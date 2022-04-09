@@ -28,7 +28,7 @@ class MixNetEnv(Env):
         self._np_random, _ = np_random(seed)
         self.__min_dataset_size = min_dataset_size
 
-        with open('../data/train_set.json', 'r') as file:
+        with open('../data/OCnodeslinks.json', 'r') as file:
             self.__traces = [Mail(**mail) for mail in json.load(file)]
 
         assert min_dataset_size >= 0, 'min_dataset_size must be non-negative'

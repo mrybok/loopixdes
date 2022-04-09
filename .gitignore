@@ -129,7 +129,6 @@ dmypy.json
 .pyre/
 
 # PROJECT SPECIFIC
-data/
 jupyter/
 loopixdes/runs
 .idea/

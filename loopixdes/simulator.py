@@ -48,11 +48,11 @@ class Simulator:
             challenger_rate: Union[int, float] = 1.0,
             provider_dist: Optional[np.ndarray] = None,
             client_model: Callable = default_client_model,
+            init_timestamp: Union[int, float] = 1640995200,
             challenger_warmup_time: Union[int, float] = 100.0,
             rng: np.random.RandomState = np.random.RandomState(),
             encryption_model: Callable = default_encryption_model,
             decryption_model: Callable = default_decryption_model,
-            init_timestamp: Union[int, float] = 1575158400.901652,
             params: Dict[str, Union[int, float]] = DEFAULT_PARAMS,
     ):
         assert isinstance(traces, list), 'traces must be list'
