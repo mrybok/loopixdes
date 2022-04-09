@@ -2,6 +2,6 @@ Minimal implementation of the [Loopix mix network design](https://www.usenix.org
 
 ---
 
-# 📧 How to run
+# 📧 
 
 ---
