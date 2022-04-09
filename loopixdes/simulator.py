@@ -10,11 +10,11 @@ from typing import Generator
 from inspect import signature
 from datetime import datetime
 
-from node import Node
 from defaults import *
-from client import Client
 from monitor import Monitor
 from model.mail import Mail
+from model.node import Node
+from model.client import Client
 from model.packet import Packet
 
 import numpy as np
