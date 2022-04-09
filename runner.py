@@ -1,7 +1,7 @@
 import json
 
-from loopixdes.simulator import Simulator
 from loopixdes.model.mail import Mail
+from loopixdes.simulator import Simulator
 
 if __name__ == "__main__":
     with open('data/OCnodeslinks.json', 'r') as file:

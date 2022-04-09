@@ -1,6 +1,6 @@
 from typing import Union
 
-from defaults import EPS
+from loopixdes.defaults import EPS
 
 from numpy import array
 from numpy import ndarray

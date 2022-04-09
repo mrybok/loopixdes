@@ -27,6 +27,7 @@ LABELS = [
 
 LOG_STR =                                                                       \
     '                        time: |{:^39s}|                                \n' \
+    '                online users: |{:^39d}|                                \n' \
     '               bandwidth use: |{:^39s}|                                \n' \
     '                              -----------------------------------------\n' \
     '                              |   min   |  mean   |   max   |   std   |\n' \
@@ -36,9 +37,6 @@ LOG_STR =                                                                       
     '            loop mix latency: |{:^9.3f}|{:^9.3f}|{:^9.3f}|{:^9.3f}|    \n' \
     '     incremental entropy mix: |{:^9.3f}|{:^9.3f}|{:^9.3f}|{:^9.3f}|    \n' \
     'incremental entropy provider: |{:^9.3f}|{:^9.3f}|{:^9.3f}|{:^9.3f}|      '
-
-# TODO ADD USERS
-# '                online users: |{:^39f}|                                \n' \
 
 
 def default_client_model(timestamp: float) -> int:
@@ -66,8 +64,8 @@ def default_decryption_model(**kwargs) -> float:
     return max(kwargs['_Simulator__rng'].normal(loc, scale), EPS)
 
 
-def default_udp_model(**kwargs) -> float:
-    rtt = 0.02
+def default_transport_model(**kwargs) -> float:
+    propagation_delay = 0.02
     bandwidth_per_thread = 1.5625e7
 
     num_layers = kwargs['_Simulator__num_layers']
@@ -75,8 +73,8 @@ def default_udp_model(**kwargs) -> float:
 
     packet_size = header_size(num_layers) + payload_size
 
-    return packet_size / bandwidth_per_thread + rtt
+    return packet_size / bandwidth_per_thread + propagation_delay
 
 
-def header_size(num_layers: int) -> float:
+def header_size(num_layers: int) -> int:
     return num_layers * 49 + 116

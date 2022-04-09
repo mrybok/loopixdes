@@ -10,12 +10,12 @@ from typing import Generator
 from inspect import signature
 from datetime import datetime
 
-from defaults import *
-from monitor import Monitor
-from model.mail import Mail
-from model.node import Node
-from model.client import Client
-from model.packet import Packet
+from loopixdes.defaults import *
+from loopixdes.monitor import Monitor
+from loopixdes.model.mail import Mail
+from loopixdes.model.node import Node
+from loopixdes.model.client import Client
+from loopixdes.model.packet import Packet
 
 import numpy as np
 from tqdm.auto import tqdm
@@ -43,13 +43,13 @@ class Simulator:
             num_client_threads: int = 1,
             loop_mix_entropy: bool = True,
             num_provider_threads: int = 64,
-            udp_model: Callable = default_udp_model,
             warmup_time: Union[int, float] = 2500.0,
             challenger_rate: Union[int, float] = 1.0,
             provider_dist: Optional[np.ndarray] = None,
             client_model: Callable = default_client_model,
             init_timestamp: Union[int, float] = 1640995200,
             challenger_warmup_time: Union[int, float] = 100.0,
+            transport_model: Callable = default_transport_model,
             rng: np.random.RandomState = np.random.RandomState(),
             encryption_model: Callable = default_encryption_model,
             decryption_model: Callable = default_decryption_model,
@@ -95,12 +95,12 @@ class Simulator:
         assert num_provider_threads > 0, 'num_server_threads must be positive'
         assert challenger_warmup_time > 0.0, 'challenger_warmup_time must be positive'
 
-        assert isinstance(udp_model, type(lambda: None))
         assert isinstance(client_model, type(lambda: None))
+        assert isinstance(transport_model, type(lambda: None))
         assert isinstance(encryption_model, type(lambda: None))
         assert isinstance(decryption_model, type(lambda: None))
-        assert str(signature(udp_model).return_annotation) == "<class 'float'>"
         assert str(signature(client_model).return_annotation) == "<class 'int'>"
+        assert str(signature(transport_model).return_annotation) == "<class 'float'>"
         assert str(signature(encryption_model).return_annotation) == "<class 'float'>"
         assert str(signature(decryption_model).return_annotation) == "<class 'float'>"
 
@@ -115,7 +115,6 @@ class Simulator:
         self.__rng = rng
         self.__params = params
         self.__traces = traces
-        self.__udp_model = udp_model
         self.__num_layers = num_layers
         self.__warmup_time = warmup_time
         self.__update_rate = update_rate
@@ -124,6 +123,7 @@ class Simulator:
         self.__provider_dist = provider_dist
         self.__plaintext_size = plaintext_size
         self.__init_timestamp = init_timestamp
+        self.__transport_model = transport_model
         self.__challenger_rate = challenger_rate
         self.__num_mix_threads = num_mix_threads
         self.__loop_mix_entropy = loop_mix_entropy
@@ -438,7 +438,7 @@ class Simulator:
 
         yield requests
 
-        runtime = self.__udp_model(**self.__dict__)
+        runtime = self.__transport_model(**self.__dict__)
 
         yield self.__env.timeout(runtime)
         self.__pki[receiver].threads.release(receiver_request)
@@ -528,7 +528,7 @@ class Simulator:
             else:
                 self.__pbar.update(self.__logging_rate)
 
-            stats = [self.__env.now]
+            stats = [self.__env.now, self.__get_num_workers()]
             stats += list(self.__monitor.get(self.__env.now))
 
             if self.__tensorboard is not None:
@@ -539,10 +539,10 @@ class Simulator:
             stats[0] = datetime.fromtimestamp(stats[0])
             stats[0] = stats[0].strftime('%Y-%m-%d, %A, %H:%M:%S')
 
-            if stats[1] < 1.25e5:
-                stats[1] = f'{stats[1] / 125:.3f} Kbps'
+            if stats[2] < 1.25e5:
+                stats[2] = f'{stats[2] / 125:.3f} Kbps'
             else:
-                stats[1] = f'{stats[1] / 1.25e5:.3f} Mbps'
+                stats[2] = f'{stats[2] / 1.25e5:.3f} Mbps'
 
             for idx, desc in enumerate(LOG_STR.format(*stats).split('\n')):
                 self.__pbar.display(desc, idx + 1)

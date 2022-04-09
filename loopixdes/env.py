@@ -2,7 +2,7 @@ from typing import Tuple
 from typing import TypeVar
 from typing import Optional
 
-from simulator import Simulator
+from loopixdes.simulator import Simulator
 
 import numpy as np
 from gym import Env
