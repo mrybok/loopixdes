@@ -13,6 +13,7 @@ from datetime import datetime
 from node import Node
 from defaults import *
 from client import Client
+from monitor import Monitor
 from model.mail import Mail
 from model.packet import Packet
 
@@ -20,8 +21,8 @@ import numpy as np
 from tqdm.auto import tqdm
 from simpy import Resource
 from simpy import Environment
+from tensorflow import summary
 from simpy.util import start_delayed
-from torch.utils.tensorboard import SummaryWriter
 
 
 class Simulator:
@@ -35,14 +36,13 @@ class Simulator:
             num_providers: int = 3,
             nodes_per_layer: int = 3,
             tensorboard: bool = False,
+            logging_rate: int = 20000,
+            update_rate: int = 100000,
             num_mix_threads: int = 16,
             plaintext_size: int = 5082,
             num_client_threads: int = 1,
             loop_mix_entropy: bool = True,
-            state_sequence_length: int = 2,
             num_provider_threads: int = 64,
-            logging_rate: Union[int, float] = 1.0,
-            update_rate: Union[int, float] = 100.0,
             udp_model: Callable = default_udp_model,
             warmup_time: Union[int, float] = 2500.0,
             challenger_rate: Union[int, float] = 1.0,
@@ -59,7 +59,9 @@ class Simulator:
         assert isinstance(params, dict), 'params must be dict'
         assert isinstance(verbose, bool), 'verbose must be bool'
         assert isinstance(num_layers, int), 'num_layers must be int'
+        assert isinstance(update_rate, int), 'update_rate must be int'
         assert isinstance(tensorboard, bool), 'tensorboard must be bool'
+        assert isinstance(logging_rate, int), 'logging_rate must be int'
         assert isinstance(warmup_time, NUM), 'warmup_time must be number'
         assert isinstance(num_providers, int), 'num_providers must be int'
         assert isinstance(plaintext_size, int), 'plaintext_size must be int'
@@ -70,7 +72,6 @@ class Simulator:
         assert isinstance(loop_mix_entropy, bool), 'loop_mix_entropy must be bool'
         assert isinstance(num_client_threads, int), 'num_client_threads must be int'
         assert isinstance(num_provider_threads, int), 'num_server_threads must be int'
-        assert isinstance(state_sequence_length, int), 'state_sequence_length must be int'
         assert isinstance(rng, np.random.RandomState), 'rng must be np.random.RandomState'
         assert isinstance(challenger_warmup_time, NUM), 'challenger_warmup_time must be number'
 
@@ -81,9 +82,9 @@ class Simulator:
         assert all([value > 0.0 for value in params.values()]), 'all params must be positive'
 
         assert num_layers > 0, 'num_layers must be positive'
-        assert update_rate > 0.0, 'update_rate must be positive'
+        assert update_rate > 0, 'update_rate must be positive'
         assert warmup_time > 0.0, 'warmup_time must be positive'
-        assert logging_rate > 0.0, 'logging_rate must be positive'
+        assert logging_rate > 0, 'logging_rate must be positive'
         assert num_providers > 0, 'num_providers must be positive'
         assert plaintext_size > 0, 'plaintext_size must be positive'
         assert nodes_per_layer > 0, 'nodes_per_layer must be positive'
@@ -92,10 +93,7 @@ class Simulator:
         assert init_timestamp >= 0.0, 'init_timestamp must be non-negative'
         assert num_client_threads > 0, 'num_client_threads must be positive'
         assert num_provider_threads > 0, 'num_server_threads must be positive'
-        assert state_sequence_length > 0, 'state_sequence_length must be positive'
         assert challenger_warmup_time > 0.0, 'challenger_warmup_time must be positive'
-
-        assert update_rate >= EPS + (state_sequence_length - 1) * logging_rate
 
         assert isinstance(udp_model, type(lambda: None))
         assert isinstance(client_model, type(lambda: None))
@@ -117,10 +115,8 @@ class Simulator:
         self.__rng = rng
         self.__params = params
         self.__traces = traces
-        self.__verbose = verbose
         self.__udp_model = udp_model
         self.__num_layers = num_layers
-        self.__tensorboard = tensorboard
         self.__warmup_time = warmup_time
         self.__update_rate = update_rate
         self.__client_model = client_model
@@ -204,29 +200,24 @@ class Simulator:
         start_delayed(self.__env, self.__challenge_worker(0), delay)
         start_delayed(self.__env, self.__challenge_worker(1), delay)
 
-        if self.__verbose:
-            self.__env.process(self.__logging_wrapper())
-
-        # TODO metrics - bandwidth
         total = self.__warmup_time + self.__challenger_warmup_time
 
-        self.__writer = None
-        self.__latency = 0.0
-        self.__bandwidth = 0
+        self.__pbar = None
         self.__active_users = {}
+        self.__tensorboard = None
         self.__latency_tracker = {}
         self.__num_payload_delivered = 0
         self.__run_id = f'run_{uuid4().hex}'
-        self.__logging_interval_start = initial_time
+        self.__monitor = Monitor(self.__env.now)
         self.__termination_event = self.__env.event()
-        self.__state_sequence_length = state_sequence_length
-        self.__state_buffer = Queue(maxsize=state_sequence_length)
-        self.__pbar = tqdm(
-            total=total, bar_format=BAR_FORMAT, disable=not verbose, position=0
-        )
 
-        if self.__tensorboard:
-            self.__writer = SummaryWriter()
+        if tensorboard:
+            self.__tensorboard = summary.create_file_writer(f'./runs/{self.__run_id}')
+
+        if verbose:
+            self.__pbar = tqdm(
+                total=total, bar_format=BAR_FORMAT, position=0
+            )
 
     def __get_num_workers(self) -> int:
         num_workers = self.__client_model(self.__env.now)
@@ -329,10 +320,17 @@ class Simulator:
             self.__users[sender].threads.release(request)
             self.__users[sender].payload_queue.put(packet)
 
+            self.__monitor.bandwidth += header_size(self.__num_layers)
+
             if sender not in self.__active_users:
                 self.__active_users[sender] = 1
             else:
                 self.__active_users[sender] += 1
+
+        padding_overhead = self.__plaintext_size - mail.size % self.__plaintext_size
+
+        if padding_overhead != self.__plaintext_size:
+            self.__monitor.bandwidth += padding_overhead
 
     def __challenge_worker(self, num: int) -> Generator:
         last_time = self.__env.now
@@ -355,6 +353,8 @@ class Simulator:
 
             yield self.__env.timeout(delay)
             self.__env.process(self.__send_packet(of_type))
+
+            self.__monitor.bandwidth += self.__plaintext_size + header_size(self.__num_layers)
 
     def __send_packet(
             self,
@@ -415,6 +415,7 @@ class Simulator:
             if is_non_zero and is_last_layer and is_measure_time:
                 epsilon = abs(np.log2(data.dist[0] / data.dist[1]))
                 self.__pki[sender].epsilon = epsilon
+                self.__monitor.e2e.update(epsilon)
 
         if of_type == 'PAYLOAD' and actual_type == 'PAYLOAD':
             msg_id = data.msg_id
@@ -459,7 +460,12 @@ class Simulator:
             if loop_mix_entropy:
                 self.__pki[sender].l_t += 1
 
-            self.__pki[sender].update_entropy()
+            h_t = self.__pki[sender].update_entropy()
+
+            if self.__pki[sender].layer == 0:
+                self.__monitor.entropy_provider.update(h_t)
+            else:
+                self.__monitor.entropy_mix.update(h_t)
 
         receiver = data.path[0][0]
         request = self.__pki[receiver].threads.request()
@@ -500,95 +506,88 @@ class Simulator:
 
         if of_type == 'PAYLOAD' and self.__latency_tracker[msg_id][0] == 0:
             self.__num_payload_delivered += 1
-            self.__latency = self.__env.now - self.__latency_tracker[msg_id][1]
+            latency = self.__env.now - self.__latency_tracker[msg_id][1]
+
+            self.__monitor.latency_payload.update(latency)
 
             if self.__num_payload_delivered == len(self.__traces):
                 self.__termination_event.succeed()
 
         elif of_type == 'LOOP_MIX':
             node_id = packet.path[0][0]
+            mix_latency = self.__pki[node_id].postprocess(self.__env.now, msg_id)
 
-            self.__pki[node_id].postprocess(self.__env.now, msg_id)
+            self.__monitor.latency_mix.update(mix_latency)
 
-    def __capture_state(self) -> np.ndarray:
-        if self.__state_buffer.full():
-            self.__state_buffer.get()
+    def __log(self, event_idx: int):
+        if self.__pbar is not None and (event_idx + 1) % self.__logging_rate == 0:
+            time_remaining = self.__init_timestamp - self.__env.now
 
-        performance_metrics = [[], [], [], []]
-
-        for node_id, node in self.__pki.items():
-            performance_metrics[1] += [node.loop_mix_latency]
-
-            if node.layer > 0:
-                performance_metrics[2] += [node.h_t]
-
-                if node.layer == self.__num_layers:
-                    performance_metrics[0] += [node.epsilon]
+            if 0 < time_remaining:
+                self.__pbar.update(self.__pbar.total - self.__pbar.n - time_remaining)
             else:
-                performance_metrics[3] += [node.h_t]
+                self.__pbar.update(self.__logging_rate)
 
-        summary_stats = np.zeros(20)
-        summary_stats[0] = self.__env.now
-        summary_stats[1] = self.__get_num_workers()
-        summary_stats[2] = self.__latency
-        summary_stats[3] = self.__bandwidth
+            stats = [self.__env.now]
+            stats += list(self.__monitor.get(self.__env.now))
 
-        for i in range(4):
-            summary_stats[4 * i + 4] = np.min(performance_metrics[i])
-            summary_stats[4 * i + 5] = np.mean(performance_metrics[i])
-            summary_stats[4 * i + 6] = np.max(performance_metrics[i])
-            summary_stats[4 * i + 7] = np.std(performance_metrics[i])
+            if self.__tensorboard is not None:
+                with self.__tensorboard.as_default():
+                    for name, data in zip(LABELS, np.array(stats)[IDX]):
+                        summary.scalar(name, data, step=int(self.__env.now * 1e6))
 
-        self.__state_buffer.put(summary_stats)
+            stats[0] = datetime.fromtimestamp(stats[0])
+            stats[0] = stats[0].strftime('%Y-%m-%d, %A, %H:%M:%S')
 
-        return summary_stats
+            if stats[1] < 1.25e5:
+                stats[1] = f'{stats[1] / 125:.3f} Kbps'
+            else:
+                stats[1] = f'{stats[1] / 1.25e5:.3f} Mbps'
 
-    def __logging_wrapper(self, step_end: Optional[float] = None) -> Generator:
-        counter = 0
-        sequence_len = self.__state_sequence_length
-
-        if step_end is not None:
-            capture_start = step_end - (sequence_len - 1) * self.__logging_rate
-            timeout = capture_start - self.__env.now - EPS
-
-            yield self.__env.timeout(timeout)
-            self.__capture_state()
-
-            counter += 1
-
-        non_verbose = step_end is not None and counter < sequence_len
-
-        while self.__verbose or non_verbose:
-            yield self.__env.timeout(self.__logging_rate)
-
-            stats = self.__capture_state()
-
-            if self.__verbose:
-                update = self.__env.now - self.__logging_interval_start
-
-                self.__pbar.update(update - self.__pbar.n)
-
-                display_stats = list(stats)
-                timestamp = datetime.fromtimestamp(stats[0])
-                display_stats[0] = timestamp.strftime('%Y-%m-%d, %A, %H:%M:%S')
-
-                for idx, desc in enumerate(LOG_STR.format(*display_stats).split('\n')):
-                    self.__pbar.display(desc, idx + 1)
-
-            if self.__tensorboard:
-                args = (self.__run_id, dict(zip(LABELS, stats[IDX])), stats[0])
-
-                self.__writer.add_scalars(*args)
-
-            counter += 1
+            for idx, desc in enumerate(LOG_STR.format(*stats).split('\n')):
+                self.__pbar.display(desc, idx + 1)
 
     def warmup(self):
-        self.__env.run(self.__init_timestamp)
+        event_idx = 0
 
-        if self.__verbose:
+        while self.__env.now < self.__init_timestamp:
+            self.__env.step()
+            self.__log(event_idx)
+
+            event_idx += 1
+
+        if self.__pbar is not None:
             update = self.__warmup_time + self.__challenger_warmup_time
 
             self.__pbar.update(update - self.__pbar.n)
+
+    def render(
+            self,
+            verbose: bool = True,
+            tensorboard: bool = True,
+    ):
+        assert isinstance(verbose, bool), 'verbose must be bool'
+        assert isinstance(tensorboard, bool), 'tensorboard must be bool'
+
+        if verbose and self.__pbar is None:
+            self.__pbar = tqdm(
+                total=self.__update_rate, bar_format=BAR_FORMAT, position=0
+            )
+
+        if not verbose:
+            if self.__pbar is not None:
+                self.__pbar.close()
+
+            self.__pbar = None
+
+        if tensorboard and self.__tensorboard is None:
+            self.__tensorboard = summary.create_file_writer(f'./runs/{self.__run_id}')
+
+        if not tensorboard:
+            if self.__tensorboard is not None:
+                self.__tensorboard.close()
+
+            self.__tensorboard = None
 
     def update_parameters(self, params: np.ndarray):
         assert params.shape == 5, 'wrong number of parameters'
@@ -596,54 +595,51 @@ class Simulator:
 
         self.__params = dict(zip(list(DEFAULT_PARAMS.keys()), params))
 
-    def simulation_step(
-            self,
-            until: Optional[Union[float, int]] = None
-    ) -> Tuple[np.ndarray, np.ndarray, bool, Dict]:
+    def simulation_step(self) -> Tuple[np.ndarray, np.ndarray, bool, Dict]:
         assert not self.__termination_event.triggered, 'episode ended already, init new simulator'
-        assert until is None or (isinstance(until, NUM) and until > 0.0), 'until must be positive'
 
-        if until is None:
-            until = self.__update_rate
+        if self.__pbar is not None:
+            self.__pbar.reset(self.__update_rate)
 
-        if not self.__verbose:
-            self.__env.process(self.__logging_wrapper(self.__env.now + until))
-        else:
-            self.__pbar.reset(until)
+        self.__monitor.reset(self.__env.now)
 
-        self.__logging_interval_start = self.__env.now
-        timeout = self.__env.timeout(until)
-        until_event = self.__env.any_of((self.__termination_event, timeout))
+        for event_idx in range(self.__update_rate):
+            self.__env.step()
+            self.__log(event_idx)
 
-        self.__env.run(until_event)
+        if self.__pbar is not None:
+            self.__pbar.update(self.__update_rate - self.__pbar.n)
 
-        if self.__verbose:
-            self.__pbar.update(until - self.__pbar.n)
+            if self.__termination_event.triggered:
+                self.__pbar.close()
 
-        if self.__termination_event.triggered:
-            self.__pbar.close()
+        state = np.zeros(38)
 
-        state = np.zeros((self.__state_sequence_length, 32))
+        state[0] = self.__num_layers
+        state[1] = len(self.__providers)
+        state[2] = len(self.__per_layer_pki[1])
+        state[3] = self.__plaintext_size
 
-        state[:, :5] = np.array(list(self.__params.values()))
-        state[:, 5] = self.__num_layers
-        state[:, 6] = len(self.__providers)
-        state[:, 7] = len(self.__per_layer_pki[1])
-        state[:, 8] = self.__plaintext_size
+        shifted_date = 2 * np.pi / (24 * 60 * 60)
+        shifted_date *= (self.__monitor.start_time - REF_TIMESTAMP)
 
-        for step in range(self.__state_sequence_length):
-            stats = self.__state_buffer.get()
-            shifted_date = 2 * np.pi / (24 * 60 * 60)
-            shifted_date *= (stats[0] - REF_TIMESTAMP)
-            state[step, 9] = np.sin(shifted_date)
-            state[step, 10] = np.cos(shifted_date)
-            state[step, 11] = np.sin(shifted_date / 7)
-            state[step, 12] = np.cos(shifted_date / 7)
-            state[step, 13:] = stats[1:]
+        state[4] = np.sin(shifted_date)
+        state[5] = np.cos(shifted_date)
+        state[6] = np.sin(shifted_date / 7)
+        state[7] = np.cos(shifted_date / 7)
 
-            self.__state_buffer.put(stats)
+        shifted_date = 2 * np.pi / (24 * 60 * 60)
+        shifted_date *= (self.__env.now - REF_TIMESTAMP)
 
-        reward = state[:, 15:]
+        state[8] = np.sin(shifted_date)
+        state[9] = np.cos(shifted_date)
+        state[10] = np.sin(shifted_date / 7)
+        state[11] = np.cos(shifted_date / 7)
+
+        state[12:17] = np.array(list(self.__params.values()))
+        state[17:] = self.__monitor.get(self.__env.now)
+
+        reward = state[17:]
         done = self.__termination_event.triggered
 
         return state, reward, done, {}

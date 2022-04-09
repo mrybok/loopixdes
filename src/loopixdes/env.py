@@ -58,7 +58,7 @@ class MixNetEnv(Env):
         return self.__simulator.simulation_step()
 
     def render(self, mode: str = "human"):
-        raise NotImplementedError
+        self.__simulator.render(True, True)
 
     def close(self):
         del self.__traces

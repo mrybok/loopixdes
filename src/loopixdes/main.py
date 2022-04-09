@@ -11,8 +11,8 @@ if __name__ == "__main__":
     traces = [Mail(**mail) for mail in traces]
 
     sim = Simulator(
-        traces, verbose=True
+        traces, verbose=True, tensorboard=True, logging_rate=20000, update_rate=int(1e6)
     )
+
     sim.warmup()
-    # sim.simulation_step(5e6)
-    sim.simulation_step(1000)
+    # sim.simulation_step()

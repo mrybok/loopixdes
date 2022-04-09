@@ -20,19 +20,16 @@ class Node:
 
         self.threads = threads
         self.sending_time = {}
-        self.loop_mix_latency = 0.0
 
-    def postprocess(self, timestamp: float, msg_id: str):
-        all_times = self.sending_time.values()
-        all_times = [timestamp - send_time for send_time, _ in all_times]
-        max_latency = max(all_times)
-        self.loop_mix_latency = max_latency
+    def postprocess(self, timestamp: float, msg_id: str) -> float:
         expected_delay = self.sending_time[msg_id][1]
         msg_latency = timestamp - self.sending_time[msg_id][0]
 
         assert msg_latency >= expected_delay, 'MESSAGE RECEIVED TOO EARLY'
 
         del self.sending_time[msg_id]
+
+        return msg_latency
 
     def update_entropy(self,) -> float:
         denominator = self.k_t + self.l_t
