@@ -25,7 +25,7 @@ class MixNetEnv(Env):
         self._np_random, _ = np_random(seed)
 
     def reset(self, seed: Optional[int] = None, **kwargs) -> ObsType:
-        self.__kwargs.update(kwargs)
+        self.__kwargs.update(**kwargs)
 
         if seed is not None:
             self._np_random, _ = np_random(seed)

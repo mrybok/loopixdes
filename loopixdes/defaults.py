@@ -3,17 +3,17 @@ import numpy as np
 EPS = 1e-13
 NUM = (int, float)
 REF_TIMESTAMP = 345600
-IDX = np.array([1, 3, 7, 11, 15, 19])
+IDX = np.array([2, 4, 8, 12, 16, 20])
 
-BAR_FORMAT = "{percentage:.1f}%|{bar}| {n:.1f}/{total} " \
+BAR_FORMAT = "{percentage:.1f}%|{bar}| {n:.1f}/{total:.1f} " \
              "[{elapsed}<{remaining} {postfix}]"
 
 DEFAULT_PARAMS = {
-    'DROP': 5.0,
-    'LOOP': 5.0,
-    'DELAY': 1.0,
-    'PAYLOAD': 5.0,
-    'LOOP_MIX': 5.0,
+    'DROP': 200/3,
+    'LOOP': 200/3,
+    'DELAY': 1,
+    'PAYLOAD': 200/3,
+    'LOOP_MIX': 18,
 }
 
 LABELS = [
@@ -43,33 +43,32 @@ def default_client_model(timestamp: float) -> int:
     return 100
 
 
-# TODO CLEAN KWARGS
 def default_encryption_model(**kwargs) -> float:
-    num_layers = kwargs['_Simulator__num_layers']
-    plaintext_size = kwargs['_Simulator__plaintext_size']
+    num_layers = kwargs['num_layers']
+    plaintext_size = kwargs['plaintext_size']
 
-    loc = 1.26672150e-7 * plaintext_size + 8.49356836e-4 * num_layers
-    loc += 4.07480411e-4
-    scale = 1.3898e-4 * num_layers + 4.8268e-4
+    loc = 1.3e-7 * plaintext_size + 8e-4 * num_layers
+    loc += 4e-4
+    scale = 1e-4 * num_layers + 5e-4
 
-    return max(kwargs['_Simulator__rng'].normal(loc, scale), EPS)
+    return max(kwargs['rng'].normal(loc, scale), EPS)
 
 
 def default_decryption_model(**kwargs) -> float:
-    plaintext_size = kwargs['_Simulator__plaintext_size']
+    plaintext_size = kwargs['plaintext_size']
 
-    loc = 1.20195552e-8 * plaintext_size + 8.03016416e-4
-    scale = 3.6622e-4
+    loc = 1e-8 * plaintext_size + 8e-4
+    scale = 4e-4
 
-    return max(kwargs['_Simulator__rng'].normal(loc, scale), EPS)
+    return max(kwargs['rng'].normal(loc, scale), EPS)
 
 
 def default_transport_model(**kwargs) -> float:
     propagation_delay = 0.02
     bandwidth_per_thread = 1.5625e7
 
-    num_layers = kwargs['_Simulator__num_layers']
-    payload_size = kwargs['_Simulator__plaintext_size']
+    num_layers = kwargs['num_layers']
+    payload_size = kwargs['plaintext_size']
 
     packet_size = header_size(num_layers) + payload_size
 

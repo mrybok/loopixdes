@@ -132,3 +132,4 @@ dmypy.json
 jupyter/
 runs/
 .idea/
+cleaner.py

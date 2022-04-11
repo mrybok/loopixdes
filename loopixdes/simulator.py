@@ -1,3 +1,4 @@
+from os import environ
 from uuid import uuid4
 from queue import Queue
 from typing import Union
@@ -7,7 +8,6 @@ from typing import Tuple
 from typing import Callable
 from typing import Optional
 from typing import Generator
-from inspect import signature
 from datetime import datetime
 
 from loopixdes.defaults import *
@@ -24,6 +24,11 @@ from simpy import Environment
 from tensorflow import summary
 from simpy.util import start_delayed
 
+environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
+# TODO ADD KWARGS WRAPPER
+# TODO ADD PARAMETER UPPER BOUNDS
+
 
 class Simulator:
     """SIMULATOR"""
@@ -35,20 +40,21 @@ class Simulator:
             verbose: bool = False,
             num_providers: int = 3,
             nodes_per_layer: int = 3,
+            sequence_length: int = 5,
             tensorboard: bool = False,
+            warmup_time: int = 300000,
+            update_rate: int = 500000,
             logging_rate: int = 20000,
-            update_rate: int = 100000,
             num_mix_threads: int = 16,
             plaintext_size: int = 5082,
             num_client_threads: int = 1,
             loop_mix_entropy: bool = True,
             num_provider_threads: int = 64,
-            warmup_time: Union[int, float] = 2500.0,
+            challenger_warmup_time: int = 300000,
             challenger_rate: Union[int, float] = 1.0,
             provider_dist: Optional[np.ndarray] = None,
             client_model: Callable = default_client_model,
             init_timestamp: Union[int, float] = 1640995200,
-            challenger_warmup_time: Union[int, float] = 100.0,
             transport_model: Callable = default_transport_model,
             rng: np.random.RandomState = np.random.RandomState(),
             encryption_model: Callable = default_encryption_model,
@@ -60,11 +66,12 @@ class Simulator:
         assert isinstance(verbose, bool), 'verbose must be bool'
         assert isinstance(num_layers, int), 'num_layers must be int'
         assert isinstance(update_rate, int), 'update_rate must be int'
+        assert isinstance(warmup_time, int), 'warmup_time must be int'
         assert isinstance(tensorboard, bool), 'tensorboard must be bool'
         assert isinstance(logging_rate, int), 'logging_rate must be int'
-        assert isinstance(warmup_time, NUM), 'warmup_time must be number'
         assert isinstance(num_providers, int), 'num_providers must be int'
         assert isinstance(plaintext_size, int), 'plaintext_size must be int'
+        assert isinstance(sequence_length, int), 'sequence_length must be int'
         assert isinstance(nodes_per_layer, int), 'nodes_per_layer must be int'
         assert isinstance(init_timestamp, NUM), 'init_timestamp must be number'
         assert isinstance(num_mix_threads, int), 'num_server_threads must be int'
@@ -73,7 +80,7 @@ class Simulator:
         assert isinstance(num_client_threads, int), 'num_client_threads must be int'
         assert isinstance(num_provider_threads, int), 'num_server_threads must be int'
         assert isinstance(rng, np.random.RandomState), 'rng must be np.random.RandomState'
-        assert isinstance(challenger_warmup_time, NUM), 'challenger_warmup_time must be number'
+        assert isinstance(challenger_warmup_time, int), 'challenger_warmup_time must be int'
 
         assert all([isinstance(value, NUM) for value in params.values()]), 'non-number'
         assert all([isinstance(mail, Mail) for mail in traces]), 'every traces item must be Mail'
@@ -83,26 +90,25 @@ class Simulator:
 
         assert num_layers > 0, 'num_layers must be positive'
         assert update_rate > 0, 'update_rate must be positive'
-        assert warmup_time > 0.0, 'warmup_time must be positive'
+        assert warmup_time > 0, 'warmup_time must be positive'
         assert logging_rate > 0, 'logging_rate must be positive'
         assert num_providers > 0, 'num_providers must be positive'
         assert plaintext_size > 0, 'plaintext_size must be positive'
+        assert sequence_length > 0, 'sequence_length must be positive'
         assert nodes_per_layer > 0, 'nodes_per_layer must be positive'
         assert challenger_rate > 0.0, 'challenger_rate must be positive'
         assert num_mix_threads > 0, 'num_server_threads must be positive'
         assert init_timestamp >= 0.0, 'init_timestamp must be non-negative'
         assert num_client_threads > 0, 'num_client_threads must be positive'
         assert num_provider_threads > 0, 'num_server_threads must be positive'
-        assert challenger_warmup_time > 0.0, 'challenger_warmup_time must be positive'
+        assert challenger_warmup_time > 0, 'challenger_warmup_time must be positive'
+
+        assert update_rate % sequence_length == 0, 'update_rate not divisible by sequence_length'
 
         assert isinstance(client_model, type(lambda: None))
         assert isinstance(transport_model, type(lambda: None))
         assert isinstance(encryption_model, type(lambda: None))
         assert isinstance(decryption_model, type(lambda: None))
-        assert str(signature(client_model).return_annotation) == "<class 'int'>"
-        assert str(signature(transport_model).return_annotation) == "<class 'float'>"
-        assert str(signature(encryption_model).return_annotation) == "<class 'float'>"
-        assert str(signature(decryption_model).return_annotation) == "<class 'float'>"
 
         if provider_dist is None:
             provider_dist = np.ones(num_providers) / num_providers
@@ -111,6 +117,12 @@ class Simulator:
         assert len(provider_dist) == num_providers, 'wrong provider_dist dimensionality'
         assert sum(provider_dist) == 1.0, 'provider_dist must be probability distribution'
         assert all(list(provider_dist > 0.0)), 'provider_dist must be probability distribution'
+
+        event_to_time = (10 * num_layers * sum([v for k, v in params.items() if k != 'DELAY']))
+        warmup_time /= event_to_time
+        challenger_warmup_time /= event_to_time
+
+        assert init_timestamp >= warmup_time + challenger_warmup_time, 'increase the init_timestamp'
 
         self.__rng = rng
         self.__params = params
@@ -124,6 +136,7 @@ class Simulator:
         self.__plaintext_size = plaintext_size
         self.__init_timestamp = init_timestamp
         self.__transport_model = transport_model
+        self.__sequence_length = sequence_length
         self.__challenger_rate = challenger_rate
         self.__num_mix_threads = num_mix_threads
         self.__loop_mix_entropy = loop_mix_entropy
@@ -203,13 +216,23 @@ class Simulator:
         total = self.__warmup_time + self.__challenger_warmup_time
 
         self.__pbar = None
+        self.__event_idx = 0
         self.__active_users = {}
         self.__tensorboard = None
         self.__latency_tracker = {}
         self.__num_payload_delivered = 0
         self.__run_id = f'run_{uuid4().hex}'
-        self.__monitor = Monitor(self.__env.now)
+        self.__state_monitor = Monitor(self.__env.now)
+        self.__reward_monitor = Monitor(self.__env.now)
         self.__termination_event = self.__env.event()
+
+        self.__kwargs = {
+            'sender': None,
+            'receiver': None,
+            'rng': self.__rng,
+            'num_layers': self.__num_layers,
+            'plaintext_size': self.__plaintext_size,
+        }
 
         if tensorboard:
             self.__tensorboard = summary.create_file_writer(f'./runs/{self.__run_id}')
@@ -313,14 +336,16 @@ class Simulator:
 
             yield request
 
-            runtime = self.__encryption_model(**self.__dict__)
+            self.__kwargs.update(**{'sender': sender, 'receiver': receiver})
+            runtime = self.__encryption_model(**self.__kwargs)
 
             yield self.__env.timeout(runtime)
 
             self.__users[sender].threads.release(request)
             self.__users[sender].payload_queue.put(packet)
 
-            self.__monitor.bandwidth += header_size(self.__num_layers)
+            self.__state_monitor.bandwidth += header_size(self.__num_layers)
+            self.__reward_monitor.bandwidth += header_size(self.__num_layers)
 
             if sender not in self.__active_users:
                 self.__active_users[sender] = 1
@@ -330,7 +355,8 @@ class Simulator:
         padding_overhead = self.__plaintext_size - mail.size % self.__plaintext_size
 
         if padding_overhead != self.__plaintext_size:
-            self.__monitor.bandwidth += padding_overhead
+            self.__state_monitor.bandwidth += padding_overhead
+            self.__reward_monitor.bandwidth += padding_overhead
 
     def __challenge_worker(self, num: int) -> Generator:
         last_time = self.__env.now
@@ -354,7 +380,10 @@ class Simulator:
             yield self.__env.timeout(delay)
             self.__env.process(self.__send_packet(of_type))
 
-            self.__monitor.bandwidth += self.__plaintext_size + header_size(self.__num_layers)
+            packet_size = self.__plaintext_size + header_size(self.__num_layers)
+
+            self.__state_monitor.bandwidth += packet_size
+            self.__reward_monitor.bandwidth += packet_size
 
     def __send_packet(
             self,
@@ -415,7 +444,8 @@ class Simulator:
             if is_non_zero and is_last_layer and is_measure_time:
                 epsilon = abs(np.log2(data.dist[0] / data.dist[1]))
                 self.__pki[sender].epsilon = epsilon
-                self.__monitor.e2e.update(epsilon)
+                self.__state_monitor.e2e.update(epsilon)
+                self.__reward_monitor.e2e.update(epsilon)
 
         if of_type == 'PAYLOAD' and actual_type == 'PAYLOAD':
             msg_id = data.msg_id
@@ -438,7 +468,8 @@ class Simulator:
 
         yield requests
 
-        runtime = self.__transport_model(**self.__dict__)
+        self.__kwargs.update(**{'sender': sender, 'receiver': None})
+        runtime = self.__transport_model(**self.__kwargs)
 
         yield self.__env.timeout(runtime)
         self.__pki[receiver].threads.release(receiver_request)
@@ -463,16 +494,19 @@ class Simulator:
             h_t = self.__pki[sender].update_entropy()
 
             if self.__pki[sender].layer == 0:
-                self.__monitor.entropy_provider.update(h_t)
+                self.__state_monitor.entropy_provider.update(h_t)
+                self.__reward_monitor.entropy_provider.update(h_t)
             else:
-                self.__monitor.entropy_mix.update(h_t)
+                self.__state_monitor.entropy_mix.update(h_t)
+                self.__reward_monitor.entropy_mix.update(h_t)
 
         receiver = data.path[0][0]
         request = self.__pki[receiver].threads.request()
 
         yield request
 
-        runtime = self.__decryption_model(**self.__dict__)
+        self.__kwargs.update(**{'sender': None, 'receiver': receiver})
+        runtime = self.__decryption_model(**self.__kwargs)
 
         yield self.__env.timeout(runtime)
         self.__pki[receiver].threads.release(request)
@@ -508,7 +542,8 @@ class Simulator:
             self.__num_payload_delivered += 1
             latency = self.__env.now - self.__latency_tracker[msg_id][1]
 
-            self.__monitor.latency_payload.update(latency)
+            self.__state_monitor.latency_payload.update(latency)
+            self.__reward_monitor.latency_payload.update(latency)
 
             if self.__num_payload_delivered == len(self.__traces):
                 self.__termination_event.succeed()
@@ -517,44 +552,75 @@ class Simulator:
             node_id = packet.path[0][0]
             mix_latency = self.__pki[node_id].postprocess(self.__env.now, msg_id)
 
-            self.__monitor.latency_mix.update(mix_latency)
+            self.__state_monitor.latency_mix.update(mix_latency)
+            self.__reward_monitor.latency_mix.update(mix_latency)
 
-    def __log(self, event_idx: int):
-        if self.__pbar is not None and (event_idx + 1) % self.__logging_rate == 0:
-            time_remaining = self.__init_timestamp - self.__env.now
+    def __log(self):
+        any_log = self.__pbar is not None or self.__tensorboard is not None
 
-            if 0 < time_remaining:
-                self.__pbar.update(self.__pbar.total - self.__pbar.n - time_remaining)
-            else:
-                self.__pbar.update(self.__logging_rate)
-
+        if any_log and (self.__event_idx + 1) % self.__logging_rate == 0:
             stats = [self.__env.now, self.__get_num_workers()]
-            stats += list(self.__monitor.get(self.__env.now))
+            stats += list(self.__reward_monitor.get(self.__env.now))
 
             if self.__tensorboard is not None:
                 with self.__tensorboard.as_default():
                     for name, data in zip(LABELS, np.array(stats)[IDX]):
-                        summary.scalar(name, data, step=int(self.__env.now * 1e6))
+                        summary.scalar(name, data, step=self.__event_idx)
 
-            stats[0] = datetime.fromtimestamp(stats[0])
-            stats[0] = stats[0].strftime('%Y-%m-%d, %A, %H:%M:%S')
+            if self.__pbar is not None:
+                stats[0] = datetime.fromtimestamp(stats[0])
+                stats[0] = stats[0].strftime('%Y-%m-%d, %A, %H:%M:%S')
 
-            if stats[2] < 1.25e5:
-                stats[2] = f'{stats[2] / 125:.3f} Kbps'
-            else:
-                stats[2] = f'{stats[2] / 1.25e5:.3f} Mbps'
+                if stats[2] < 1.25e5:
+                    stats[2] = f'{stats[2] / 125:.3f} Kbps'
+                else:
+                    stats[2] = f'{stats[2] / 1.25e5:.3f} Mbps'
 
-            for idx, desc in enumerate(LOG_STR.format(*stats).split('\n')):
-                self.__pbar.display(desc, idx + 1)
+                time_remaining = self.__init_timestamp - self.__env.now
+
+                if 0 < time_remaining:
+                    self.__pbar.update(self.__pbar.total - self.__pbar.n - time_remaining)
+                else:
+                    self.__pbar.update(self.__logging_rate)
+
+                for idx, desc in enumerate(LOG_STR.format(*stats).split('\n')):
+                    self.__pbar.display(desc, idx + 1)
+
+    def __get_state_rep(self, monitor: Monitor) -> np.ndarray:
+        state = np.zeros(38)
+
+        state[0] = self.__num_layers
+        state[1] = len(self.__providers)
+        state[2] = len(self.__per_layer_pki[1])
+        state[3] = self.__plaintext_size
+
+        shifted_date = 2 * np.pi / (24 * 60 * 60)
+        shifted_date *= (monitor.start_time - REF_TIMESTAMP)
+
+        state[4] = np.sin(shifted_date)
+        state[5] = np.cos(shifted_date)
+        state[6] = np.sin(shifted_date / 7)
+        state[7] = np.cos(shifted_date / 7)
+
+        shifted_date = 2 * np.pi / (24 * 60 * 60)
+        shifted_date *= (self.__env.now - REF_TIMESTAMP)
+
+        state[8] = np.sin(shifted_date)
+        state[9] = np.cos(shifted_date)
+        state[10] = np.sin(shifted_date / 7)
+        state[11] = np.cos(shifted_date / 7)
+
+        state[12:17] = np.array(list(self.__params.values()))
+        state[17:] = monitor.get(self.__env.now)
+
+        return state
 
     def warmup(self):
-        event_idx = 0
-
         while self.__env.now < self.__init_timestamp:
             self.__env.step()
-            self.__log(event_idx)
+            self.__log()
 
-            event_idx += 1
+            self.__event_idx += 1
 
         if self.__pbar is not None:
             update = self.__warmup_time + self.__challenger_warmup_time
@@ -590,7 +656,7 @@ class Simulator:
             self.__tensorboard = None
 
     def update_parameters(self, params: np.ndarray):
-        assert params.shape == 5, 'wrong number of parameters'
+        assert params.shape[0] == 5, 'wrong number of parameters'
         assert np.all(params > 0.0), 'out of bound parameters'
 
         self.__params = dict(zip(list(DEFAULT_PARAMS.keys()), params))
@@ -601,11 +667,24 @@ class Simulator:
         if self.__pbar is not None:
             self.__pbar.reset(self.__update_rate)
 
-        self.__monitor.reset(self.__env.now)
+        self.__state_monitor.reset(self.__env.now)
+        self.__reward_monitor.reset(self.__env.now)
 
-        for event_idx in range(self.__update_rate):
+        state = np.zeros((self.__sequence_length, 38))
+        state_idx = 0
+        state_rate = int(self.__update_rate / self.__sequence_length)
+
+        for step_idx in range(self.__update_rate):
             self.__env.step()
-            self.__log(event_idx)
+            self.__log()
+
+            self.__event_idx += 1
+
+            if (step_idx + 1) % state_rate == 0:
+                state[state_idx, :] = self.__get_state_rep(self.__state_monitor)
+                state_idx += 1
+
+                self.__state_monitor.reset(self.__env.now)
 
         if self.__pbar is not None:
             self.__pbar.update(self.__update_rate - self.__pbar.n)
@@ -613,33 +692,7 @@ class Simulator:
             if self.__termination_event.triggered:
                 self.__pbar.close()
 
-        state = np.zeros(38)
-
-        state[0] = self.__num_layers
-        state[1] = len(self.__providers)
-        state[2] = len(self.__per_layer_pki[1])
-        state[3] = self.__plaintext_size
-
-        shifted_date = 2 * np.pi / (24 * 60 * 60)
-        shifted_date *= (self.__monitor.start_time - REF_TIMESTAMP)
-
-        state[4] = np.sin(shifted_date)
-        state[5] = np.cos(shifted_date)
-        state[6] = np.sin(shifted_date / 7)
-        state[7] = np.cos(shifted_date / 7)
-
-        shifted_date = 2 * np.pi / (24 * 60 * 60)
-        shifted_date *= (self.__env.now - REF_TIMESTAMP)
-
-        state[8] = np.sin(shifted_date)
-        state[9] = np.cos(shifted_date)
-        state[10] = np.sin(shifted_date / 7)
-        state[11] = np.cos(shifted_date / 7)
-
-        state[12:17] = np.array(list(self.__params.values()))
-        state[17:] = self.__monitor.get(self.__env.now)
-
-        reward = state[17:]
+        reward = self.__get_state_rep(self.__reward_monitor)[17:]
         done = self.__termination_event.triggered
 
         return state, reward, done, {}
