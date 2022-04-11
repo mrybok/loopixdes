@@ -224,8 +224,8 @@ class Simulator:
         self.__active_users = {}
         self.__tensorboard = None
         self.__latency_tracker = {}
+        self.__payload_latency = 0.0
         self.__num_payload_delivered = 0
-        self.__payload_latency = Queue(32)
         self.__run_id = f'run_{uuid4().hex}'
         self.__state_monitor = Monitor(self.__env.now)
         self.__reward_monitor = Monitor(self.__env.now)
@@ -547,10 +547,8 @@ class Simulator:
             self.__num_payload_delivered += 1
             latency = self.__env.now - self.__latency_tracker[msg_id][1]
 
-            if self.__payload_latency.full():
-                self.__payload_latency.get()
-
-            self.__payload_latency.put((latency, self.__env.now))
+            self.__payload_latency *= 0.9
+            self.__payload_latency += 0.1 * latency
 
             if self.__num_payload_delivered == len(self.__traces):
                 self.__termination_event.succeed()
@@ -562,25 +560,12 @@ class Simulator:
             self.__state_monitor.latency_mix.update(mix_latency)
             self.__reward_monitor.latency_mix.update(mix_latency)
 
-    def __get_payload_latency(self) -> float:
-        if self.__payload_latency.empty():
-            return 0.0
-
-        latencies = self.__payload_latency.queue
-        weights = [max(time - self.__env.now, EPS) for _, time in latencies]
-        weights = np.exp(weights)
-        weights /= np.sum(weights)
-        latencies = np.array([latency for latency, _ in latencies])
-        payload_latency = sum(latencies * weights)
-
-        return payload_latency
-
     def __log(self):
         any_log = self.__pbar is not None or self.__tensorboard is not None
 
         if any_log and (self.__event_idx + 1) % self.__logging_rate == 0:
             stats = [self.__env.now, self.__get_num_workers()]
-            stats += [self.__get_payload_latency()]
+            stats += [self.__payload_latency]
             stats += list(self.__reward_monitor.get(self.__env.now))
 
             if self.__tensorboard is not None:
@@ -632,7 +617,7 @@ class Simulator:
         state[11] = np.cos(shifted_date / 7)
 
         state[12:17] = np.array(list(self.__params.values()))
-        state[17] = self.__get_payload_latency()
+        state[17] = self.__payload_latency
         state[18:] = monitor.get(self.__env.now)
 
         return state
