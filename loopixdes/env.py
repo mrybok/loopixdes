@@ -12,8 +12,8 @@ ActType = TypeVar("ActType")
 ObsType = TypeVar("ObsType")
 
 
-class MixNetEnv(Env):
-    """MixNetEnv"""
+class LoopixEnv(Env):
+    """LoopixEnv"""
 
     def __init__(
             self,

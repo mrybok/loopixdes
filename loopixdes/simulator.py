@@ -26,7 +26,7 @@ from simpy.util import start_delayed
 
 environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-# TODO ADD KWARGS WRAPPER
+# TODO FIX PAYLOAD LATENCY
 # TODO ADD PARAMETER UPPER BOUNDS
 
 
