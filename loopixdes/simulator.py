@@ -26,9 +26,6 @@ from simpy.util import start_delayed
 
 environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-# TODO FIX PAYLOAD LATENCY
-# TODO ADD PARAMETER UPPER BOUNDS
-
 
 class Simulator:
     """SIMULATOR"""
@@ -53,6 +50,7 @@ class Simulator:
             challenger_warmup_time: int = 300000,
             challenger_rate: Union[int, float] = 1.0,
             provider_dist: Optional[np.ndarray] = None,
+            header_size: Callable = default_header_size,
             client_model: Callable = default_client_model,
             init_timestamp: Union[int, float] = 1640995200,
             transport_model: Callable = default_transport_model,
@@ -105,10 +103,15 @@ class Simulator:
 
         assert update_rate % sequence_length == 0, 'update_rate not divisible by sequence_length'
 
+        assert isinstance(header_size, type(lambda: None))
         assert isinstance(client_model, type(lambda: None))
         assert isinstance(transport_model, type(lambda: None))
         assert isinstance(encryption_model, type(lambda: None))
         assert isinstance(decryption_model, type(lambda: None))
+
+        header_size = header_size(num_layers)
+
+        assert isinstance(header_size, int)
 
         if provider_dist is None:
             provider_dist = np.ones(num_providers) / num_providers
@@ -130,6 +133,7 @@ class Simulator:
         self.__num_layers = num_layers
         self.__warmup_time = warmup_time
         self.__update_rate = update_rate
+        self.__header_size = header_size
         self.__client_model = client_model
         self.__logging_rate = logging_rate
         self.__provider_dist = provider_dist
@@ -221,6 +225,7 @@ class Simulator:
         self.__tensorboard = None
         self.__latency_tracker = {}
         self.__num_payload_delivered = 0
+        self.__payload_latency = Queue(32)
         self.__run_id = f'run_{uuid4().hex}'
         self.__state_monitor = Monitor(self.__env.now)
         self.__reward_monitor = Monitor(self.__env.now)
@@ -344,8 +349,8 @@ class Simulator:
             self.__users[sender].threads.release(request)
             self.__users[sender].payload_queue.put(packet)
 
-            self.__state_monitor.bandwidth += header_size(self.__num_layers)
-            self.__reward_monitor.bandwidth += header_size(self.__num_layers)
+            self.__state_monitor.bandwidth += self.__header_size
+            self.__reward_monitor.bandwidth += self.__header_size
 
             if sender not in self.__active_users:
                 self.__active_users[sender] = 1
@@ -380,7 +385,7 @@ class Simulator:
             yield self.__env.timeout(delay)
             self.__env.process(self.__send_packet(of_type))
 
-            packet_size = self.__plaintext_size + header_size(self.__num_layers)
+            packet_size = self.__plaintext_size + self.__header_size
 
             self.__state_monitor.bandwidth += packet_size
             self.__reward_monitor.bandwidth += packet_size
@@ -542,8 +547,10 @@ class Simulator:
             self.__num_payload_delivered += 1
             latency = self.__env.now - self.__latency_tracker[msg_id][1]
 
-            self.__state_monitor.latency_payload.update(latency)
-            self.__reward_monitor.latency_payload.update(latency)
+            if self.__payload_latency.full():
+                self.__payload_latency.get()
+
+            self.__payload_latency.put((latency, self.__env.now))
 
             if self.__num_payload_delivered == len(self.__traces):
                 self.__termination_event.succeed()
@@ -555,11 +562,25 @@ class Simulator:
             self.__state_monitor.latency_mix.update(mix_latency)
             self.__reward_monitor.latency_mix.update(mix_latency)
 
+    def __get_payload_latency(self) -> float:
+        if self.__payload_latency.empty():
+            return 0.0
+
+        latencies = self.__payload_latency.queue
+        weights = [max(time - self.__env.now, EPS) for _, time in latencies]
+        weights = np.exp(weights)
+        weights /= np.sum(weights)
+        latencies = np.array([latency for latency, _ in latencies])
+        payload_latency = sum(latencies * weights)
+
+        return payload_latency
+
     def __log(self):
         any_log = self.__pbar is not None or self.__tensorboard is not None
 
         if any_log and (self.__event_idx + 1) % self.__logging_rate == 0:
             stats = [self.__env.now, self.__get_num_workers()]
+            stats += [self.__get_payload_latency()]
             stats += list(self.__reward_monitor.get(self.__env.now))
 
             if self.__tensorboard is not None:
@@ -571,10 +592,10 @@ class Simulator:
                 stats[0] = datetime.fromtimestamp(stats[0])
                 stats[0] = stats[0].strftime('%Y-%m-%d, %A, %H:%M:%S')
 
-                if stats[2] < 1.25e5:
-                    stats[2] = f'{stats[2] / 125:.3f} Kbps'
+                if stats[3] < 1.25e5:
+                    stats[3] = f'{stats[3] / 125:.3f} Kbps'
                 else:
-                    stats[2] = f'{stats[2] / 1.25e5:.3f} Mbps'
+                    stats[3] = f'{stats[3] / 1.25e5:.3f} Mbps'
 
                 time_remaining = self.__init_timestamp - self.__env.now
 
@@ -587,7 +608,7 @@ class Simulator:
                     self.__pbar.display(desc, idx + 1)
 
     def __get_state_rep(self, monitor: Monitor) -> np.ndarray:
-        state = np.zeros(38)
+        state = np.zeros(35)
 
         state[0] = self.__num_layers
         state[1] = len(self.__providers)
@@ -611,7 +632,8 @@ class Simulator:
         state[11] = np.cos(shifted_date / 7)
 
         state[12:17] = np.array(list(self.__params.values()))
-        state[17:] = monitor.get(self.__env.now)
+        state[17] = self.__get_payload_latency()
+        state[18:] = monitor.get(self.__env.now)
 
         return state
 
@@ -657,7 +679,8 @@ class Simulator:
 
     def update_parameters(self, params: np.ndarray):
         assert params.shape[0] == 5, 'wrong number of parameters'
-        assert np.all(params > 0.0), 'out of bound parameters'
+        assert np.all(5000.0 >= params), 'out of bound parameters'
+        assert np.all(0.0 < params), 'out of bound parameters'
 
         self.__params = dict(zip(list(DEFAULT_PARAMS.keys()), params))
 
@@ -670,7 +693,7 @@ class Simulator:
         self.__state_monitor.reset(self.__env.now)
         self.__reward_monitor.reset(self.__env.now)
 
-        state = np.zeros((self.__sequence_length, 38))
+        state = np.zeros((self.__sequence_length, 35))
         state_idx = 0
         state_rate = int(self.__update_rate / self.__sequence_length)
 

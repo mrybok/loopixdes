@@ -3,7 +3,7 @@ import numpy as np
 EPS = 1e-13
 NUM = (int, float)
 REF_TIMESTAMP = 345600
-IDX = np.array([2, 4, 8, 12, 16, 20])
+IDX = np.array([2, 3, 5, 9, 13, 17])
 
 BAR_FORMAT = "{percentage:.1f}%|{bar}| {n:.1f}/{total:.1f} " \
              "[{elapsed}<{remaining} {postfix}]"
@@ -17,9 +17,9 @@ DEFAULT_PARAMS = {
 }
 
 LABELS = [
+    'payload_latency',
     'bandwidth',
     'e2e_entropy',
-    'payload_latency',
     'loop_mix_latency',
     'incremental_entropy_mix',
     'incremental_entropy_provider'
@@ -28,12 +28,12 @@ LABELS = [
 LOG_STR =                                                                       \
     '                        time: |{:^39s}|                                \n' \
     '                online users: |{:^39d}|                                \n' \
+    '             payload latency: |{:^39.5f}|                              \n' \
     '               bandwidth use: |{:^39s}|                                \n' \
     '                              -----------------------------------------\n' \
     '                              |   min   |  mean   |   max   |   std   |\n' \
     '                              -----------------------------------------\n' \
     '               e2e anonymity: |{:^9.5f}|{:^9.5f}|{:^9.5f}|{:^9.5f}|    \n' \
-    '             payload latency: |{:^9.3f}|{:^9.3f}|{:^9.3f}|{:^9.3f}|    \n' \
     '            loop mix latency: |{:^9.3f}|{:^9.3f}|{:^9.3f}|{:^9.3f}|    \n' \
     '     incremental entropy mix: |{:^9.3f}|{:^9.3f}|{:^9.3f}|{:^9.3f}|    \n' \
     'incremental entropy provider: |{:^9.3f}|{:^9.3f}|{:^9.3f}|{:^9.3f}|      '
@@ -70,10 +70,10 @@ def default_transport_model(**kwargs) -> float:
     num_layers = kwargs['num_layers']
     payload_size = kwargs['plaintext_size']
 
-    packet_size = header_size(num_layers) + payload_size
+    packet_size = default_header_size(num_layers) + payload_size
 
     return packet_size / bandwidth_per_thread + propagation_delay
 
 
-def header_size(num_layers: int) -> int:
+def default_header_size(num_layers: int) -> int:
     return num_layers * 49 + 116

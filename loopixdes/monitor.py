@@ -14,7 +14,6 @@ class Monitor:
         self.e2e = SummaryWrapper()
         self.entropy_mix = SummaryWrapper()
         self.latency_mix = SummaryWrapper()
-        self.latency_payload = SummaryWrapper()
         self.entropy_provider = SummaryWrapper()
 
         self.bandwidth = 0
@@ -24,7 +23,6 @@ class Monitor:
         self.e2e.reset()
         self.entropy_mix.reset()
         self.latency_mix.reset()
-        self.latency_payload.reset()
         self.entropy_provider.reset()
 
         self.bandwidth = 0
@@ -34,7 +32,6 @@ class Monitor:
         interval = max(end_time - self.start_time, EPS)
         summaries = [array([self.bandwidth / interval])]
         summaries += [self.e2e.get()]
-        summaries += [self.latency_payload.get()]
         summaries += [self.latency_mix.get()]
         summaries += [self.entropy_mix.get()]
         summaries += [self.entropy_provider.get()]

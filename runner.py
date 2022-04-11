@@ -1,6 +1,5 @@
 from loopixdes.env import LoopixEnv
 from loopixdes.util import EpisodeSampler
-from loopixdes.defaults import DEFAULT_PARAMS
 
 import numpy as np
 
@@ -23,8 +22,11 @@ if __name__ == "__main__":
         1082379653
     )
 
-    env = LoopixEnv(0, verbose=True)
-
+    env = LoopixEnv(0, verbose=True, tensorboard=True)
     kwargs = episode_sampler.sample()
-    print(env.reset(**kwargs))
-    print(env.step(np.array(list(DEFAULT_PARAMS.values()))))
+    state = env.reset(**kwargs)
+
+    for _ in range(10):
+        kwargs = episode_sampler.sample()
+        params = np.array(list(kwargs['params'].values()))
+        state, reward, done, _ = env.step(params)
