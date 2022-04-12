@@ -11,9 +11,9 @@ BAR_FORMAT = "{percentage:.1f}%|{bar}| {n:.1f}/{total:.1f} " \
 DEFAULT_PARAMS = {
     'DROP': 200/3,
     'LOOP': 200/3,
-    'DELAY': 1,
+    'DELAY': 1.0,
     'PAYLOAD': 200/3,
-    'LOOP_MIX': 18,
+    'LOOP_MIX': 18.0,
 }
 
 LABELS = [

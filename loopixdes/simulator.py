@@ -1,10 +1,10 @@
 from os import environ
 from uuid import uuid4
 from queue import Queue
-from typing import Union
 from typing import Dict
 from typing import List
 from typing import Tuple
+from typing import Union
 from typing import Callable
 from typing import Optional
 from typing import Generator
@@ -35,19 +35,19 @@ class Simulator:
             traces: List[Mail],
             num_layers: int = 3,
             verbose: bool = False,
+            mix_threads: int = 16,
             num_providers: int = 3,
+            client_threads: int = 1,
             nodes_per_layer: int = 3,
             sequence_length: int = 5,
+            logging_rate: int = 50000,
             tensorboard: bool = False,
-            warmup_time: int = 300000,
             update_rate: int = 500000,
-            logging_rate: int = 20000,
-            num_mix_threads: int = 16,
+            warmup_time: int = 500000,
             plaintext_size: int = 5082,
-            num_client_threads: int = 1,
+            provider_threads: int = 64,
+            challenger_time: int = 500000,
             loop_mix_entropy: bool = True,
-            num_provider_threads: int = 64,
-            challenger_warmup_time: int = 300000,
             challenger_rate: Union[int, float] = 1.0,
             provider_dist: Optional[np.ndarray] = None,
             header_size: Callable = default_header_size,
@@ -55,30 +55,30 @@ class Simulator:
             init_timestamp: Union[int, float] = 1640995200,
             transport_model: Callable = default_transport_model,
             rng: np.random.RandomState = np.random.RandomState(),
-            encryption_model: Callable = default_encryption_model,
             decryption_model: Callable = default_decryption_model,
+            encryption_model: Callable = default_encryption_model,
             params: Dict[str, Union[int, float]] = DEFAULT_PARAMS,
     ):
-        assert isinstance(traces, list), 'traces must be list'
         assert isinstance(params, dict), 'params must be dict'
+        assert isinstance(traces, list), 'traces must be list'
         assert isinstance(verbose, bool), 'verbose must be bool'
         assert isinstance(num_layers, int), 'num_layers must be int'
+        assert isinstance(mix_threads, int), 'mix_threads must be int'
         assert isinstance(update_rate, int), 'update_rate must be int'
         assert isinstance(warmup_time, int), 'warmup_time must be int'
         assert isinstance(tensorboard, bool), 'tensorboard must be bool'
         assert isinstance(logging_rate, int), 'logging_rate must be int'
         assert isinstance(num_providers, int), 'num_providers must be int'
+        assert isinstance(client_threads, int), 'client_threads must be int'
         assert isinstance(plaintext_size, int), 'plaintext_size must be int'
-        assert isinstance(sequence_length, int), 'sequence_length must be int'
+        assert isinstance(challenger_time, int), 'challenger_time must be int'
         assert isinstance(nodes_per_layer, int), 'nodes_per_layer must be int'
+        assert isinstance(sequence_length, int), 'sequence_length must be int'
         assert isinstance(init_timestamp, NUM), 'init_timestamp must be number'
-        assert isinstance(num_mix_threads, int), 'num_server_threads must be int'
+        assert isinstance(provider_threads, int), 'provider_threads must be int'
         assert isinstance(challenger_rate, NUM), 'challenger_rate must be number'
         assert isinstance(loop_mix_entropy, bool), 'loop_mix_entropy must be bool'
-        assert isinstance(num_client_threads, int), 'num_client_threads must be int'
-        assert isinstance(num_provider_threads, int), 'num_server_threads must be int'
         assert isinstance(rng, np.random.RandomState), 'rng must be np.random.RandomState'
-        assert isinstance(challenger_warmup_time, int), 'challenger_warmup_time must be int'
 
         assert all([isinstance(value, NUM) for value in params.values()]), 'non-number'
         assert all([isinstance(mail, Mail) for mail in traces]), 'every traces item must be Mail'
@@ -87,20 +87,21 @@ class Simulator:
         assert all([value > 0.0 for value in params.values()]), 'all params must be positive'
 
         assert num_layers > 0, 'num_layers must be positive'
+        assert mix_threads > 0, 'mix_threads must be positive'
         assert update_rate > 0, 'update_rate must be positive'
         assert warmup_time > 0, 'warmup_time must be positive'
         assert logging_rate > 0, 'logging_rate must be positive'
         assert num_providers > 0, 'num_providers must be positive'
+        assert client_threads > 0, 'client_threads must be positive'
         assert plaintext_size > 0, 'plaintext_size must be positive'
-        assert sequence_length > 0, 'sequence_length must be positive'
+        assert challenger_time > 0, 'challenger_time must be positive'
         assert nodes_per_layer > 0, 'nodes_per_layer must be positive'
+        assert sequence_length > 0, 'sequence_length must be positive'
         assert challenger_rate > 0.0, 'challenger_rate must be positive'
-        assert num_mix_threads > 0, 'num_server_threads must be positive'
+        assert provider_threads > 0, 'provider_threads must be positive'
         assert init_timestamp >= 0.0, 'init_timestamp must be non-negative'
-        assert num_client_threads > 0, 'num_client_threads must be positive'
-        assert num_provider_threads > 0, 'num_server_threads must be positive'
-        assert challenger_warmup_time > 0, 'challenger_warmup_time must be positive'
 
+        assert update_rate % logging_rate == 0, 'update_rate not divisible by logging_rate'
         assert update_rate % sequence_length == 0, 'update_rate not divisible by sequence_length'
 
         assert isinstance(header_size, type(lambda: None))
@@ -123,35 +124,35 @@ class Simulator:
 
         event_to_time = (10 * num_layers * sum([v for k, v in params.items() if k != 'DELAY']))
         warmup_time /= event_to_time
-        challenger_warmup_time /= event_to_time
+        challenger_time /= event_to_time
 
-        assert init_timestamp >= warmup_time + challenger_warmup_time, 'increase the init_timestamp'
+        assert init_timestamp >= warmup_time + challenger_time, 'increase the init_timestamp'
 
         self.__rng = rng
         self.__params = params
         self.__traces = traces
         self.__num_layers = num_layers
-        self.__warmup_time = warmup_time
-        self.__update_rate = update_rate
         self.__header_size = header_size
+        self.__mix_threads = mix_threads
+        self.__update_rate = update_rate
+        self.__warmup_time = warmup_time
         self.__client_model = client_model
         self.__logging_rate = logging_rate
         self.__provider_dist = provider_dist
-        self.__plaintext_size = plaintext_size
+        self.__client_threads = client_threads
         self.__init_timestamp = init_timestamp
-        self.__transport_model = transport_model
-        self.__sequence_length = sequence_length
+        self.__plaintext_size = plaintext_size
         self.__challenger_rate = challenger_rate
-        self.__num_mix_threads = num_mix_threads
-        self.__loop_mix_entropy = loop_mix_entropy
-        self.__encryption_model = encryption_model
+        self.__challenger_time = challenger_time
+        self.__sequence_length = sequence_length
+        self.__transport_model = transport_model
         self.__decryption_model = decryption_model
-        self.__num_client_threads = num_client_threads
-        self.__num_provider_threads = num_provider_threads
-        self.__challenger_warmup_time = challenger_warmup_time
+        self.__encryption_model = encryption_model
+        self.__loop_mix_entropy = loop_mix_entropy
+        self.__provider_threads = provider_threads
 
-        initial_time = self.__init_timestamp - self.__warmup_time
-        initial_time -= self.__challenger_warmup_time
+        initial_time = self.__init_timestamp
+        initial_time -= (self.__warmup_time + self.__challenger_time)
 
         self.__pki = {}
         self.__users = {}
@@ -161,7 +162,7 @@ class Simulator:
 
         for provider in range(num_providers):
             node_id = f'p{provider}'
-            threads = Resource(self.__env, self.__num_provider_threads)
+            threads = Resource(self.__env, self.__provider_threads)
 
             self.__providers += [f'u-{provider}']
             self.__pki[node_id] = Node(0, threads)
@@ -175,7 +176,7 @@ class Simulator:
         for layer in range(1, self.__num_layers + 1):
             for node in range(nodes_per_layer):
                 node_id = f'm{((layer - 1) * nodes_per_layer + node)}'
-                threads = Resource(self.__env, self.__num_mix_threads)
+                threads = Resource(self.__env, self.__mix_threads)
 
                 self.__pki[node_id] = Node(layer, threads)
 
@@ -196,18 +197,18 @@ class Simulator:
             provider = self.__rng.choice(providers, p=self.__provider_dist)
 
             if mail.sender not in self.__users:
-                threads = Resource(self.__env, self.__num_client_threads)
+                threads = Resource(self.__env, self.__client_threads)
                 self.__users[mail.sender] = Client(provider, threads, Queue())
             elif self.__users[mail.sender].threads is None:
-                threads = Resource(self.__env, self.__num_client_threads)
+                threads = Resource(self.__env, self.__client_threads)
                 self.__users[mail.sender].threads = threads
                 self.__users[mail.sender].payload_queue = Queue()
 
             if mail.receiver not in self.__users:
                 self.__users[mail.receiver] = Client(provider)
 
-            delay = mail.time + self.__warmup_time
-            delay += self.__challenger_warmup_time
+            delay = mail.time
+            delay += self.__warmup_time + self.__challenger_time
             start_delayed(self.__env, self.__payload_to_sphinx(mail), delay)
 
         for of_type in ['LOOP', 'DROP', 'PAYLOAD', 'LOOP_MIX']:
@@ -217,7 +218,7 @@ class Simulator:
         start_delayed(self.__env, self.__challenge_worker(0), delay)
         start_delayed(self.__env, self.__challenge_worker(1), delay)
 
-        total = self.__warmup_time + self.__challenger_warmup_time
+        total = self.__warmup_time + self.__challenger_time
 
         self.__pbar = None
         self.__event_idx = 0
@@ -227,9 +228,9 @@ class Simulator:
         self.__payload_latency = 0.0
         self.__num_payload_delivered = 0
         self.__run_id = f'run_{uuid4().hex}'
+        self.__termination_event = self.__env.event()
         self.__state_monitor = Monitor(self.__env.now)
         self.__reward_monitor = Monitor(self.__env.now)
-        self.__termination_event = self.__env.event()
 
         self.__kwargs = {
             'sender': None,
@@ -249,7 +250,7 @@ class Simulator:
 
     def __get_num_workers(self) -> int:
         num_workers = self.__client_model(self.__env.now)
-        warmup_done = self.__init_timestamp - self.__challenger_warmup_time
+        warmup_done = self.__init_timestamp - self.__challenger_time
 
         if self.__env.now > warmup_done:
             return max(num_workers, len(self.__active_users) + 3)
@@ -630,7 +631,7 @@ class Simulator:
             self.__event_idx += 1
 
         if self.__pbar is not None:
-            update = self.__warmup_time + self.__challenger_warmup_time
+            update = self.__warmup_time + self.__challenger_time
 
             self.__pbar.update(update - self.__pbar.n)
 
