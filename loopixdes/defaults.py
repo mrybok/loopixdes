@@ -47,7 +47,7 @@ def default_encryption_model(**kwargs) -> float:
     num_layers = kwargs['num_layers']
     plaintext_size = kwargs['plaintext_size']
 
-    loc = 1.3e-7 * plaintext_size + 8e-4 * num_layers
+    loc = 1e-7 * plaintext_size + 8e-4 * num_layers
     loc += 4e-4
     scale = 1e-4 * num_layers + 5e-4
 
@@ -64,7 +64,7 @@ def default_decryption_model(**kwargs) -> float:
 
 
 def default_transport_model(**kwargs) -> float:
-    propagation_delay = 0.02
+    propagation_delay = 0.001
     bandwidth_per_thread = 1.5625e7
 
     num_layers = kwargs['num_layers']
