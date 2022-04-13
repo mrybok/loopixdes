@@ -7,13 +7,13 @@ from typing import Optional
 from loopixdes.defaults import EPS
 from loopixdes.simulator import Simulator
 
-import numpy as np
 from gym import Env
 from gym import spaces
 from gym.utils.seeding import np_random
 
 ActType = TypeVar("ActType")
 ObsType = TypeVar("ObsType")
+RewType = TypeVar("RewType")
 
 
 class LoopixEnv(Env):
@@ -94,7 +94,7 @@ class LoopixEnv(Env):
 
         return obs
 
-    def step(self, action: ActType) -> Tuple[ObsType, np.ndarray, bool, dict]:
+    def step(self, action: ActType) -> Tuple[ObsType, RewType, bool, dict]:
         self.__simulator.update_parameters(action)
 
         return self.__simulator.simulation_step()

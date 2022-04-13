@@ -250,12 +250,8 @@ class Simulator:
 
     def __get_num_workers(self) -> int:
         num_workers = self.__client_model(self.__env.now)
-        warmup_done = self.__init_timestamp - self.__challenger_time
 
-        if self.__env.now > warmup_done:
-            return max(num_workers, len(self.__active_users) + 3)
-
-        return max(num_workers, 1)
+        return max(num_workers, len(self.__active_users) + 2, 3)
 
     def __sample_sender(self, payload: bool = False) -> str:
         if not payload:
@@ -368,7 +364,8 @@ class Simulator:
         last_time = self.__env.now
 
         while True:
-            delay = self.__rng.exponential(1 / self.__params['PAYLOAD'])
+            param = self.__get_num_workers() / self.__params['PAYLOAD']
+            delay = self.__rng.exponential(param)
 
             yield self.__env.timeout(delay)
 
@@ -381,6 +378,11 @@ class Simulator:
     def __decoy_worker(self, of_type: str) -> Generator:
         while True:
             param = 1 / self.__params[of_type]
+
+            if of_type == 'PAYLOAD':
+                num_workers = self.__get_num_workers()
+                param *= num_workers / (num_workers - 2)
+
             delay = self.__rng.exponential(param)
 
             yield self.__env.timeout(delay)
