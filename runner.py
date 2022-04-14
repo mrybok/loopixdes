@@ -22,9 +22,11 @@ if __name__ == "__main__":
         1082379653
     )
 
-    env = LoopixEnv(0, verbose=True, tensorboard=True)
+    env = LoopixEnv()
     kwargs = episode_sampler.sample()
-    state = env.reset(**kwargs)
+    kwargs['verbose'] = True
+    kwargs['tensorboard'] = True
+    state = env.reset(seed=0, options=kwargs)
 
     for _ in range(10):
         kwargs = episode_sampler.sample()
