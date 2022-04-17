@@ -1,0 +1,71 @@
+body {
+    font-family: 'Syne', sans-serif;
+}
+
+pre {
+    border: 0;
+    color: #333;
+    padding: 30px;
+    overflow: auto;
+    margin: 1.5em 0;
+    font-size: 13px;
+    border-radius: 0;
+    background: #e9f3f5;
+    word-break: break-all;
+    word-wrap: break-word;
+    line-height: 1.42857143;
+    font-family: Menlo,Monaco,Consolas,"Courier New",monospace;
+}
+
+.hljs {
+    color: #333;
+    display: block;
+    overflow-x: auto;
+    font-size: inherit;
+    white-space: pre-wrap;
+    padding: 0 !important;
+    background: none !important;
+}
+
+/* width */
+::-webkit-scrollbar {
+  width: 7px;
+}
+
+/* Track */
+::-webkit-scrollbar-track {
+  background: #f4f9fa;
+}
+
+/* Handle */
+::-webkit-scrollbar-thumb {
+  background: #20B2BF;
+}
+
+/* Handle on hover */
+::-webkit-scrollbar-thumb:hover {
+  background: #198e98;
+}
+
+p {
+    margin: 0;
+}
+
+.nav-link {
+    color: #7b8c90;
+}
+
+.nav-link:hover {
+    color: #383838;
+}
+
+.nav-pills .nav-link.active {
+    color: #383838;
+    background: none;
+}
+
+nav hr {
+    margin: 0;
+    background: rgba(18, 65, 69, .2)
+}
+
