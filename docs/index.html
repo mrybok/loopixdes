@@ -52,6 +52,9 @@
             <h2 id="item-1">
               What is LoopixDES?
             </h2>
+            <p>
+              LoopixDES is a discrete-event simulator of <a href="https://www.usenix.org/conference/usenixsecurity17/technical-sessions/presentation/piotrowska">The Loopix Anonymity System</a> based on the <a href="https://simpy.readthedocs.io/en/latest/index.html">SimPy</a> Python package.
+            </p>
             <hr>
             <h2 id="item-2">
               Installation
@@ -61,18 +64,21 @@
             <h2 id="item-3">
               How to use?
             </h2>
+            <pre class="highlight"><code class="hljs python"><span class="hljs-keyword">import</span> numpy <span class="hljs-keyword">as</span> np</code><code class="hljs python"><span class="hljs-keyword">from</span> loopixdes.env <span class="hljs-keyword">import</span> LoopixEnv</code><code class="hljs python"><span class="hljs-keyword">from</span> loopixdes.util <span class="hljs-keyword">import</span> load_dataset</code><code class="hljs python"><span class="hljs-keyword">from</span> loopixdes.defaults <span class="hljs-keyword">import</span> DEFAULT_PARAMS</code>
+              <code class="hljs python"></code><code class="hljs python">env = LoopixEnv()</code><code class="hljs python">dataset = load_dataset(<span class="hljs-string">"path/to/your/dataset"</span>)</code><code class="hljs python">state = env.reset(seed=<span class="hljs-number">0</span>, options={<span class="hljs-string">"traces"</span>: dataset})</code>
+              <code class="hljs python"></code><code class="hljs python"><span class="hljs-keyword">for</span> _ <span class="hljs-keyword">in</span> range(<span class="hljs-number">10</span>):</code><code class="hljs python">    params = np.array(list(DEFAULT_PARAMS.values()))</code><code class="hljs python">    state, reward, done, _ = env.step(params)</code></pre>
             <hr>
             <h2 id="item-4">
               Author
             </h2>
-            <p>
+            <p class="m-0">
               Marcin Rybok
             </p>
-            <p>
+            <p class="m-0">
               <a href="s1766172@ed.ac.uk">s1766172@ed.ac.uk</a>
             </p>
-            <p>The University of Edinburgh</p>
-            <p>
+            <p class="m-0">The University of Edinburgh</p>
+            <p class="m-0">
               2022
             </p>
           </div>
