@@ -58,6 +58,7 @@ pre {
 .nav-pills .nav-link.active {
     color: #383838;
     background: none;
+    font-weight: bold;
 }
 
 nav hr {
