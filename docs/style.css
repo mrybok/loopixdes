@@ -130,3 +130,15 @@ h3 {
     color: #998;
     font-style: italic;
 }
+
+.hljs-doctag {
+    color: #91972A;
+}
+
+.highlighter-rouge {
+    padding: 2px 4px;
+    font-size: 90%;
+    color: #c7254e;
+    background-color: #f9f2f4;
+    border-radius: 4px;
+}
