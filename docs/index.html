@@ -42,7 +42,11 @@
                 <hr>
                 <a class="nav-link" href="#item-4">Dataset</a>
                 <hr>
-                <a class="nav-link" href="#item-5">Author</a>
+                <a class="nav-link" href="#item-5">Options</a>
+                <hr>
+                <a class="nav-link" href="#item-6">Rendering</a>
+                <hr>
+                <a class="nav-link" href="#item-7">Author</a>
               </nav>
             </nav>
           </div>
@@ -56,7 +60,7 @@
             </h2>
             <p>
               <a href="https://github.com/Marti242/loopixdes">LoopixDES</a> is a discrete-event simulator of <a href="https://www.usenix.org/conference/usenixsecurity17/technical-sessions/presentation/piotrowska">The Loopix Anonymity System</a> based on the <a href="https://simpy.readthedocs.io/en/latest/index.html">SimPy</a> Python package.
-              The simulator follows a canonical <a href="https://gym.openai.com/">OpenAI Gym</a> <code class="highlighter-rouge">Env</code> interface to offer a Reinforcement Learning (RL) challenge.
+              The simulator follows a canonical <a href="https://gym.openai.com/">OpenAI Gym</a> <a href="https://github.com/openai/gym/blob/master/gym/core.py">Env</a> interface to offer a Reinforcement Learning (RL) challenge.
               The primary difference is that LoopixDES is a Multi-Objective Optimisation (MOO) problem, unlike classic <a href="https://github.com/openai/gym">gym</a> environments.
             </p>
             <hr>
@@ -68,13 +72,24 @@
             <h2 id="item-3">
               How to use?
             </h2>
-            <p></p>
+            <p>
+              The below code demonstrates the most straightforward training loop in the <span class="highlighter-rouge">LoopixEnv</span> environment.
+              The agent and buffer code parts present the possible minimal interface that an RL algorithm could follow, assuming standard <a href="https://arxiv.org/abs/1511.05952">Replay Buffer</a> for experience replay.
+              However, the showcased agent interface can vary on an optimising algorithm basis.
+              The codebase does not provide the agent or buffer implementation.
+              Instead, it is the user's task to provide such.
+              Here the agent decides how to tweak the system's parameters (i.e. takes action) with the <span class="highlighter-rouge">act</span> method.
+              On the other hand, the agent learns from the accumulated experience with the <span class="highlighter-rouge">update</span> method.
+            </p>
             <pre class="highlight"><code class="hljs python"><span class="hljs-keyword">from</span> loopixdes.env <span class="hljs-keyword">import</span> LoopixEnv</code><code class="hljs python"><span class="hljs-keyword">from</span> loopixdes.util <span class="hljs-keyword">import</span> load_dataset</code>
               <code class="hljs python">agent = Agent()</code><code class="hljs python">buffer = ReplayBuffer(<span class="hljs-doctag">capacity</span>=<span class="hljs-built_in">int</span>(<span class="hljs-number">1e6</span>))</code><code class="hljs python">traces = load_dataset(<span class="hljs-string">"path/to/your/dataset.json"</span>)</code><code class="hljs python">env = LoopixEnv()</code><code class="hljs python">batch_size = <span class="hljs-number">64</span></code><code class="hljs python">max_timesteps = <span class="hljs-number">100000</span></code><code class="hljs python">episode_length = <span class="hljs-number">2000</span></code><code class="hljs python">timesteps_elapsed = <span class="hljs-number">0</span></code>
-              <code class="hljs python"><span class="hljs-keyword">while</span> timesteps_elapsed < max_timesteps:</code><code class="hljs python">  state = env.reset(<span class="hljs-doctag">seed</span>=<span class="hljs-number">0</span>, <span class="hljs-doctag">options</span>={<span class="hljs-string">"traces"</span>: traces})    <span class="hljs-comment"># start new simulation</span></code>
-              <code class="hljs python">  <span class="hljs-keyword">for</span> _ <span class="hljs-keyword">in</span> <span class="hljs-built_in">range</span>(episode_length):</code><code class="hljs python">    action = agent.act(state)                              <span class="hljs-comment text-right"># change Loopix parameters given current state</span></code><code class="hljs python">    next_state, reward, done, _ = env.step(action)</code><code class="hljs python">    buffer.push(state, action, next_state, reward, [done]) <span class="hljs-comment"># remember the experience / state transition</span></code><code class="hljs python">    state = next_state                                     <span class="hljs-comment"># base the next action on the new state</span></code><code class="hljs python">    timesteps_elapsed += <span class="hljs-number">1</span></code>
+              <code class="hljs python"><span class="hljs-keyword">while</span> timesteps_elapsed < max_timesteps:</code><span class="d-none d-xl-block"><code class="hljs python">  state = env.reset(<span class="hljs-doctag">seed</span>=<span class="hljs-number">0</span>, <span class="hljs-doctag">options</span>={<span class="hljs-string">"traces"</span>: traces})    <span class="hljs-comment"># start new simulation</span></code>
+              <code class="hljs python">  <span class="hljs-keyword">for</span> _ <span class="hljs-keyword">in</span> <span class="hljs-built_in">range</span>(episode_length):</code><code class="hljs python">    action = agent.act(state)                              <span class="hljs-comment"># change Loopix parameters given current state</span></code><code class="hljs python">    next_state, reward, done, _ = env.step(action)</code><code class="hljs python">    buffer.push(state, action, next_state, reward, [done]) <span class="hljs-comment"># remember the experience / state transition</span></code><code class="hljs python">    state = next_state                                     <span class="hljs-comment"># base the next action on the new state</span></code><code class="hljs python">    timesteps_elapsed += <span class="hljs-number">1</span></code>
               <code class="hljs python">    <span class="hljs-keyword">if</span> <span class="hljs-built_in">len</span>(buffer) >= batch_size:</code><code class="hljs python">      batch = buffer.sample(batch_size)                    <span class="hljs-comment"># sample experience and learn from it</span></code><code class="hljs python">      agent.update(batch)</code>
-              <code class="hljs python">    <span class="hljs-keyword">if</span> done:</code><code class="hljs python">      <span class="hljs-built_in">break</span>                                                <span class="hljs-comment"># start a new episode if the current ended</span></code>
+              <code class="hljs python">    <span class="hljs-keyword">if</span> done:</code><code class="hljs python">      <span class="hljs-built_in">break</span>                                                <span class="hljs-comment"># start a new episode if the current ended</span></code></span><span class="d-xl-none"><code class="hljs python">  <span class="hljs-comment"># start new simulation</span></code><code class="hljs python">  state = env.reset(<span class="hljs-doctag">seed</span>=<span class="hljs-number">0</span>, <span class="hljs-doctag">options</span>={<span class="hljs-string">"traces"</span>: traces})</code>
+              <code class="hljs python">  <span class="hljs-keyword">for</span> _ <span class="hljs-keyword">in</span> <span class="hljs-built_in">range</span>(episode_length):</code><code class="hljs python">    action = agent.act(state) <span class="hljs-comment"># change Loopix parameters given current state</span></code><code class="hljs python">    next_state, reward, done, _ = env.step(action)</code><code class="hljs python">    <span class="hljs-comment"># remember the experience / state transition</span></code><code class="hljs python">    buffer.push(state, action, next_state, reward, [done])</code><code class="hljs python">    state = next_state <span class="hljs-comment"># base the next action on the new state</span></code><code class="hljs python">    timesteps_elapsed += <span class="hljs-number">1</span></code>
+              <code class="hljs python">    <span class="hljs-keyword">if</span> <span class="hljs-built_in">len</span>(buffer) >= batch_size:</code><code class="hljs python">      batch = buffer.sample(batch_size) <span class="hljs-comment"># sample experience and learn from it</span></code><code class="hljs python">      agent.update(batch)</code>
+              <code class="hljs python">    <span class="hljs-keyword">if</span> done:</code><code class="hljs python">      <span class="hljs-built_in">break</span> <span class="hljs-comment"># start a new episode if the current ended</span></code></span>
               <code class="hljs python">env.close()</code></pre>
             <hr>
             <h2 id="item-4">
@@ -82,6 +97,30 @@
             </h2>
             <hr>
             <h2 id="item-5">
+              Options
+            </h2>
+            <p>
+              The first example of using the <span class="highlighter-rouge">LoopixEnv</span> is limited as it always uses the default simulator settings.
+              The mix network topology does not change between the episodes.
+              The agent does not optimise the payload packet byte size.
+              The simulation always starts from the first <span class="highlighter-rouge">Mail</span> in the dataset traces.
+              For a more difficult challenge, change the above between the episodes to create an optimiser robust across different mixnet sizes.
+            </p>
+            <p>
+
+            </p>
+            <pre class="highlighte"><code class="hljs python"><span class="hljs-keyword">import</span> numpy <span class="hljs-keyword">as</span> np</code><code class="hljs python">rng = np.random.RandomState(seed)</code><code class="hljs python">...</code>
+              <code class="hljs python"><span class="hljs-keyword">while</span> timesteps_elapsed < max_timesteps:</code><code class="hljs python"><span class="hljs-comment">  # start the next simulation from random mail in the dataset</span></code><code class="hljs python">  episode_traces = traces[rng.randint(<span class="hljs-number">0</span>, <span class="hljs-built_in">len</span>(traces)):]</code><code class="hljs python">  time_offset = traces[<span class="hljs-number">0</span>].time</code>
+              <code class="hljs python"><span class="hljs-comment">  # make the sending times relative to start of the simulation</span></code><code class="hljs python">  <span class="hljs-keyword">for</span> mail <span class="hljs-keyword">in</span> episode_traces:</code><code class="hljs python">    mail.time -= time_offset</code>
+              <code class="hljs python">  options = {</code><code class="hljs python"><span class="hljs-string">    "traces"</span>: episode_traces,</code><code class="hljs python">    <span class="hljs-string">"init_timestamp"</span>: init_timestamp + time_offset,</code><code class="hljs python"><span class="hljs-string">    "num_layers"</span>: rng.randint(<span class="hljs-number">2</span>, <span class="hljs-number">21</span>), <span class="hljs-comment"># change number of layers for next run</span></code><code class="hljs python">    <span class="hljs-string">"plaintext_size"</span>: ..., <span class="hljs-comment"># set / optimise the byte packet size here</span></code><code class="hljs python">  }</code>
+              <code class="hljs python">  state = env.reset(<span class="hljs-doctag">seed</span>=<span class="hljs-number">0</span>, <span class="hljs-doctag">options</span>=options)</code>
+              <code class="hljs python">  <span class="hljs-keyword">for</span> _ <span class="hljs-keyword">in</span> <span class="hljs-built_in">range</span>(episode_length):</code><code class="hljs python">    action = agent.act(state)</code><code class="hljs python">    ...</code></pre>
+            <hr>
+            <h2 id="item-6">
+              Rendering
+            </h2>
+            <hr>
+            <h2 id="item-7">
               Author
             </h2>
             <p class="m-0">
