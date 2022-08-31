@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='LoopixDES',
-    url='https://github.com/Marti242/loopixdes',
+    url='https://github.com/mrybok/loopixdes',
     author='Marcin Rybok',
     author_email='s1766172@ed.ac.uk',
     packages=['loopixdes'],
